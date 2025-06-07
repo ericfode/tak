@@ -71,7 +71,7 @@ window.takGameApp = {
 
         // Create dynamic elements used for move controls
         this.piecesToLiftInput = this.createEl('input', {type: 'number', id: 'pieces-to-lift', min: '1'});
-        this.confirmLiftButton = this.createEl('button', {id: 'btn-confirm-lift', textContent: 'Lift Pieces'});
+        this.confirmLiftButton = this.createEl('button', {id: 'btn-confirm-lift', textContent: 'Start Move'});
         this.confirmMoveButton = this.createEl('button', {id: 'btn-confirm-move', textContent: 'Confirm Move'});
         this.cancelMoveButton = this.createEl('button', {id: 'btn-cancel-move', textContent: 'Cancel Move'});
         this.currentPathElement = this.createEl('p', {id: 'current-path-display'});
@@ -184,6 +184,9 @@ window.takGameApp = {
         if(this.btnResetGameInternal) this.btnResetGameInternal.addEventListener('click', () => this.sendSocketMessage({ action: 'reset_game' }));
 
         this.confirmLiftButton.addEventListener('click', this.handleConfirmLift.bind(this));
+        this.piecesToLiftInput.addEventListener('keyup', (e) => {
+            if (e.key === 'Enter') this.handleConfirmLift();
+        });
         this.confirmMoveButton.addEventListener('click', this.handleConfirmMove.bind(this));
         this.cancelMoveButton.addEventListener('click', this.handleCancelMove.bind(this));
     },
@@ -292,16 +295,38 @@ window.takGameApp = {
             for (let c = 0; c < this.BOARD_SIZE; c++) {
                 const cell = this.createEl('div', { className: 'board-cell' });
                 cell.dataset.r = r; cell.dataset.c = c;
-                cell.addEventListener('click', this.handleCellClick.bind(this));
                 
                 if (this.moveData.source && this.moveData.source.r === r && this.moveData.source.c === c) {
                     cell.classList.add('source-selected');
                 }
-                if (this.moveData.path.some(p => p.r === r && p.c === c)) {
+                const pathIndex = this.moveData.path.findIndex(p => p.r === r && p.c === c);
+                if (pathIndex !== -1) {
                     cell.classList.add('path-selected');
+                    if (this.currentAction === 'move_select_path_drops') {
+                        const indicator = this.createEl('div', { className: 'drop-indicator', textContent: this.moveData.path[pathIndex].drops });
+                        indicator.dataset.index = pathIndex;
+                        indicator.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            this.incrementDropCount(parseInt(indicator.dataset.index, 10));
+                        });
+                        cell.appendChild(indicator);
+                    }
                 }
 
                 const pieceStack = this.gameState.board[r] ? this.gameState.board[r][c] : [];
+                // Highlight logic to guide the player
+                if (this.currentAction.startsWith('place_')) {
+                    if (pieceStack.length === 0) cell.classList.add('highlight-empty');
+                } else if (this.currentAction === 'move_select_source') {
+                    if (pieceStack.length > 0 && pieceStack[pieceStack.length - 1].color === this.gameState.currentPlayer) {
+                        cell.classList.add('highlight-source');
+                    }
+                } else if (this.currentAction === 'move_select_path_drops') {
+                    const last = this.moveData.path[this.moveData.path.length - 1];
+                    if (Math.abs(r - last.r) + Math.abs(c - last.c) === 1) {
+                        cell.classList.add('highlight-target');
+                    }
+                }
                 if (pieceStack.length > 0) {
                     const topPiece = pieceStack[pieceStack.length - 1];
                     const pieceDiv = this.createEl('div', {
@@ -341,7 +366,9 @@ window.takGameApp = {
         if (this.currentAction === 'move_lift_pieces' && this.moveData.source) {
             const sourceStack = this.gameState.board[this.moveData.source.r][this.moveData.source.c];
             if (!sourceStack) return;
-            this.piecesToLiftInput.max = Math.min(this.BOARD_SIZE, sourceStack.length);
+            const maxLift = Math.min(this.BOARD_SIZE, sourceStack.length);
+            this.piecesToLiftInput.max = maxLift;
+            this.piecesToLiftInput.value = maxLift;
             this.moveControlsPanel.appendChild(this.createEl('label', { textContent: `Lift from (${this.moveData.source.r}, ${this.moveData.source.c}): `}));
             this.moveControlsPanel.appendChild(this.piecesToLiftInput);
             this.moveControlsPanel.appendChild(this.confirmLiftButton);
@@ -385,6 +412,15 @@ window.takGameApp = {
         }
         let activeBtn = this.actionButtonMap[this.currentAction] || (this.currentAction.startsWith('move_') ? this.btnMoveStack : null);
         if (activeBtn) activeBtn.classList.add('active-action');
+    },
+
+    incrementDropCount: function(index) {
+        const step = this.moveData.path[index];
+        const otherTotal = this.moveData.path.reduce((sum, p, i) => i === index ? sum : sum + p.drops, 0);
+        const maxAllowed = this.moveData.liftedCount - otherTotal;
+        step.drops = (step.drops % maxAllowed) + 1;
+        this.renderBoard();
+        this.renderMoveControls();
     },
     resetMoveDataAndUI: function() { this.moveData = { source: null, liftedCount: 0, path: [] }; this.renderAll(); },
 
