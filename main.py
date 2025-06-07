@@ -292,12 +292,8 @@ def create_room():
     return jsonify({"code": room_code})
 
 @app.route('/')
-def index(): return send_from_directory('.', 'index.html')
-
-@app.route('/<path:path>')
-def static_files(path):
-    if path in ['app.js', 'style.css']: return send_from_directory('.', path)
-    return send_from_directory('static', path)
+def index():
+    return send_from_directory('.', 'index.html')
 
 @sock.route('/ws/<room_code>')
 def ws_tak_game(ws, room_code):
@@ -357,6 +353,13 @@ def ws_tak_game(ws, room_code):
         if not clients:
             del rooms[room_code]
             logger.info(f"Room {room_code} is empty and has been removed.")
+
+
+@app.route('/<path:path>')
+def static_files(path):
+    if path in ['app.js', 'style.css']:
+        return send_from_directory('.', path)
+    return send_from_directory('static', path)
 
 if __name__ == '__main__':
     logger.info("Starting Tak server with TakGame class...")
