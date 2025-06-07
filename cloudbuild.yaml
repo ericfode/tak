@@ -1,0 +1,5 @@
+steps:
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args: ['app', 'deploy', '--quiet']
+# Why did the build step go to therapy? Too many unresolved dependencies! 😅 

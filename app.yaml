@@ -1,0 +1,3 @@
+runtime: python312
+entrypoint: gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -b :$PORT server:app
+# If you see this, you are a true explorer! 🥚 
