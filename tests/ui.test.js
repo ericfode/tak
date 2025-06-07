@@ -46,17 +46,35 @@ async function runTests() {
       });
     }
 
-    // Test 1: board renders correctly
+    // Capture page errors
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err));
+
+    // Test 1: gracefully handle clicks before init
+    await page.goto(BASE_URL);
+    await page.waitForSelector('#controls');
+    const threw = await page.evaluate(() => {
+      window.takGameApp.gameState.board = null;
+      try {
+        window.takGameApp.handleCellClick({ target: document.createElement('div') });
+        return false;
+      } catch (e) { return true; }
+    });
+    assert.strictEqual(threw, false, 'clicking before init should not throw');
+    assert.strictEqual(pageErrors.length, 0, 'no page errors');
+    console.log('Test 1 passed');
+
+    // Test 2: board renders correctly
     await openAndInit();
     const cells = await page.$$('#game-board .board-cell');
     assert.strictEqual(cells.length, 25, 'board should render 5x5');
-    console.log('Test 1 passed');
+    console.log('Test 2 passed');
 
-    // Test 2: placing a flat updates board
+    // Test 3: placing a flat updates board
     await page.click('#game-board .board-cell[data-r="0"][data-c="0"]');
     const piece = await page.$('#game-board .board-cell[data-r="0"][data-c="0"] .piece');
     assert.ok(piece, 'piece should exist after click');
-    console.log('Test 2 passed');
+    console.log('Test 3 passed');
 
     await browser.close();
     server.kill();
