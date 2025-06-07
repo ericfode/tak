@@ -7,9 +7,30 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="game-container">
+    <header>
         <h1>Tak Online</h1>
+        <div id="room-info" class="hidden">
+            Game Code: <code id="room-code-display"></code>
+            <button id="copy-code-btn">Copy</button>
+        </div>
+    </header>
 
+    <div id="lobby-container">
+        <h2>Join or Create a Game</h2>
+        <div class="lobby-controls">
+            <button id="btn-create-game">Create New Game</button>
+        </div>
+        <div class="lobby-controls">
+            <span>OR</span>
+        </div>
+        <div class="lobby-controls">
+            <input type="text" id="input-room-code" placeholder="Enter game code..." maxlength="6" />
+            <button id="btn-join-game">Join Game</button>
+        </div>
+        <p id="lobby-error-message" class="error-message"></p>
+    </div>
+
+    <div id="game-container" class="hidden">
         <div id="player-info">
             <p>Current Turn: <span id="current-player">White</span></p>
             <div id="piece-counts">
@@ -44,5 +65,11 @@
     </div>
 
     <script src="app.js"></script>
+    <script>
+        // Initialize the app once the DOM is fully loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            window.takGameApp.init();
+        });
+    </script>
 </body>
 </html>

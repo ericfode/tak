@@ -1,7 +1,9 @@
 import os
 import json
 import logging
-from flask import Flask, send_from_directory
+import random
+import string
+from flask import Flask, send_from_directory, jsonify, request
 from flask_sock import Sock
 from collections import deque
 
@@ -11,8 +13,20 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 sock = Sock(app)
 
-clients = set()
+# A dictionary to hold all active rooms.
+# The key is the room code, and the value is another dictionary
+# containing the game state and the set of connected clients.
+# rooms = { "room_code": {"game": TakGame(), "clients": {ws1, ws2}} }
+rooms = {}
 DEFAULT_BOARD_SIZE = 5
+
+def generate_room_code(length=6):
+    """Generates a random, uppercase, alphanumeric room code."""
+    # Easter egg: Why did the programmer quit his job? He didn't get arrays.
+    while True:
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+        if code not in rooms:
+            return code
 
 class TakGame:
     def __init__(self, board_size=DEFAULT_BOARD_SIZE):
@@ -246,16 +260,36 @@ class TakGame:
             self.game_state["currentPlayer"] = "Black" if player_who_moved == "White" else "White"
 
 
-# Global game instance
-tak_game = TakGame(board_size=DEFAULT_BOARD_SIZE)
+# Global game instance (REMOVED)
+# tak_game = TakGame(board_size=DEFAULT_BOARD_SIZE)
 
-def broadcast_state_update():
-    message = {"type": "update", "data": tak_game.get_state()}
+def broadcast_state_update(room_code):
+    """Broadcasts the current game state to all clients in a room."""
+    room = rooms.get(room_code)
+    if not room:
+        return
+
+    message = {"type": "update", "data": room["game"].get_state()}
     json_message = json.dumps(message)
-    for client_ws in list(clients):
-        try: client_ws.send(json_message)
+    # Iterate over a copy of the set for safe removal
+    for client_ws in list(room["clients"]):
+        try:
+            client_ws.send(json_message)
         except Exception as e:
-            logger.error(f"Broadcast error: {e}"); clients.remove(client_ws)
+            logger.error(f"Broadcast error in room {room_code}: {e}")
+            room["clients"].remove(client_ws)
+
+@app.route('/api/rooms', methods=['POST'])
+def create_room():
+    """Creates a new game room and returns its code."""
+    board_size = request.json.get('board_size', DEFAULT_BOARD_SIZE)
+    room_code = generate_room_code()
+    rooms[room_code] = {
+        "game": TakGame(board_size=board_size),
+        "clients": set()
+    }
+    logger.info(f"Room {room_code} created with board size {board_size}.")
+    return jsonify({"code": room_code})
 
 @app.route('/')
 def index(): return send_from_directory('.', 'index.html')
@@ -265,47 +299,64 @@ def static_files(path):
     if path in ['app.js', 'style.css']: return send_from_directory('.', path)
     return send_from_directory('static', path)
 
-@sock.route('/ws')
-def ws_tak_game(ws):
+@sock.route('/ws/<room_code>')
+def ws_tak_game(ws, room_code):
+    """Handles WebSocket connections for a specific game room."""
+    room = rooms.get(room_code)
+    if not room:
+        logger.warning(f"Connection attempt to non-existent room {room_code}.")
+        ws.close(reason=1008, message="Room not found")
+        return
+
+    game_instance = room["game"]
+    clients = room["clients"]
+
     clients.add(ws)
-    logger.info(f"Client connected. Total: {len(clients)}")
-    ws.send(json.dumps({"type": "init", "data": tak_game.get_state(), "message": "Welcome!"}))
+    logger.info(f"Client connected to room {room_code}. Total clients in room: {len(clients)}")
+    ws.send(json.dumps({"type": "init", "data": game_instance.get_state(), "message": f"Welcome to room {room_code}!"}))
 
     try:
         while True:
             message_str = ws.receive(timeout=None)
             if message_str is None: break
-            logger.info(f"Rx: {message_str}")
+            logger.info(f"Rx in room {room_code}: {message_str}")
             data = json.loads(message_str)
             action = data.get("action")
-            player = tak_game.game_state["currentPlayer"]
+            # The player is determined by the game state within the room
+            player = game_instance.game_state["currentPlayer"]
 
-            if tak_game.game_state["game_over"] and action != "reset_game":
-                ws.send(json.dumps({"type": "info", "message": "Game is over."})); continue
+            if game_instance.game_state["game_over"] and action != "reset_game":
+                ws.send(json.dumps({"type": "info", "message": "Game is over."}))
+                continue
 
             error_response = None
             if action == "reset_game":
-                tak_game.reset_game_state()
-                broadcast_state_update()
+                game_instance.reset_game_state()
+                broadcast_state_update(room_code)
                 continue
             elif action in ["place_flat", "place_wall", "place_capstone"]:
-                error_response = tak_game.handle_placement(player, data.get("r"), data.get("c"), action.split('_')[1])
+                error_response = game_instance.handle_placement(player, data.get("r"), data.get("c"), action.split('_')[1])
             elif action == "move_stack":
-                error_response = tak_game.handle_move_stack(player, data.get("from_r"), data.get("from_c"), data.get("drops"))
+                error_response = game_instance.handle_move_stack(player, data.get("from_r"), data.get("from_c"), data.get("drops"))
             else:
                 error_response = {"type": "error", "message": "Unknown action."}
 
             if error_response:
                 ws.send(json.dumps(error_response))
             else:
-                broadcast_state_update()
+                broadcast_state_update(room_code)
 
     except Exception as e:
-        logger.error(f"WS error: {e}", exc_info=True)
+        logger.error(f"WS error in room {room_code}: {e}", exc_info=True)
     finally:
         clients.remove(ws)
-        logger.info(f"Client disconnected. Total: {len(clients)}")
+        logger.info(f"Client disconnected from room {room_code}. Total clients in room: {len(clients)}")
+        # Optional: Clean up empty rooms
+        if not clients:
+            del rooms[room_code]
+            logger.info(f"Room {room_code} is empty and has been removed.")
 
 if __name__ == '__main__':
     logger.info("Starting Tak server with TakGame class...")
+    # Note: `use_reloader=False` is important for not losing the `rooms` dict on reload
     app.run(host='0.0.0.0', port=8080, debug=True, use_reloader=False)
