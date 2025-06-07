@@ -197,6 +197,10 @@ window.takGameApp = {
         if (!cell) return;
         const r = parseInt(cell.dataset.r, 10);
         const c = parseInt(cell.dataset.c, 10);
+        if (!this.gameState.board || !this.gameState.board[r] || !this.gameState.board[r][c]) {
+            this.gameMessagesElement.textContent = 'Game not initialized.';
+            return;
+        }
 
         if (this.currentAction.startsWith('place_')) {
             // Optimistic UI update for placement
