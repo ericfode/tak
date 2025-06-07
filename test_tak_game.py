@@ -269,6 +269,25 @@ class TestTakGame(unittest.TestCase):
         self.assertIsNotNone(res)
         self.assertEqual(res["message"], "Cannot move this stack.")
 
+    def test_move_invalid_turning_path(self):
+        # Setup a simple two-piece stack for White
+        self.game.game_state["board"][0][0] = [
+            {"color": "White", "type": "flat"},
+            {"color": "White", "type": "flat"}
+        ]
+        self.game.game_state["pieces"]["White"]["flats"] -= 2
+        self.game.game_state["currentPlayer"] = "White"
+
+        # Attempt an L-shaped move: first east then south
+        drops = [
+            {"r":0,"c":0,"count":0},
+            {"r":0,"c":1,"count":1},
+            {"r":1,"c":1,"count":1}
+        ]
+        res = self.game.handle_move_stack("White", 0, 0, drops)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["message"], "Path must be straight.")
+
     def test_capstone_flatten_wall(self):
         self.game.handle_placement("White", 0, 0, "capstone") # W Cap
         self.game.handle_placement("Black", 0, 1, "wall")   # B Wall
