@@ -342,6 +342,8 @@ def ws_tak_game(ws, room_code):
                 error_response = {"type": "error", "message": "Unknown action."}
 
             if error_response:
+                # If there's an error, send it back to the client, but also include the last valid game state for rollback.
+                error_response["data"] = game_instance.get_state()
                 ws.send(json.dumps(error_response))
             else:
                 broadcast_state_update(room_code)
