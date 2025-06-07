@@ -93,15 +93,10 @@ class TakGame:
     def check_flat_win(self):
         board_full = all(self.game_state["board"][r][c] for r in range(self.board_size) for c in range(self.board_size))
 
-        current_player_pieces = self.game_state["pieces"][self.game_state["currentPlayer"]]
-        player_out_of_pieces = current_player_pieces["flats"] == 0 and current_player_pieces["capstones"] == 0
-
-        # Check if any player is out of pieces (more accurate for game end by running out of pieces)
         white_out = self.game_state["pieces"]["White"]["flats"] == 0 and self.game_state["pieces"]["White"]["capstones"] == 0
         black_out = self.game_state["pieces"]["Black"]["flats"] == 0 and self.game_state["pieces"]["Black"]["capstones"] == 0
 
-
-        if not board_full and not white_out and not black_out : # Game ends if board is full OR ANY player is out of pieces
+        if not board_full and not white_out and not black_out :
             return None
 
         white_flats, black_flats = 0, 0
@@ -116,28 +111,64 @@ class TakGame:
         if black_flats > white_flats: return "Black"
         return "Draw"
 
-    def handle_placement(self, player, r, c, piece_type):
+    def handle_placement(self, player, r, c, piece_type_to_place):
         if self.game_state["game_over"]: return {"type": "error", "message": "Game is over."}
         if not self.validate_coordinates(r,c): return {"type": "error", "message": "Invalid coordinates."}
-        if self.game_state["board"][r][c]: return {"type": "error", "message": "Cell is not empty."}
 
         player_pieces = self.game_state["pieces"][player]
-        actual_piece_type = piece_type # 'flat', 'wall', 'capstone'
+        target_cell_stack = self.game_state["board"][r][c]
 
-        if piece_type == "flat" or piece_type == "wall":
-            if player_pieces["flats"] <= 0: return {"type": "error", "message": "No flats left."}
-            player_pieces["flats"] -= 1
-        elif piece_type == "capstone":
-            if player_pieces["capstones"] <= 0: return {"type": "error", "message": "No capstones left."}
-            player_pieces["capstones"] -= 1
-        else:
-            return {"type": "error", "message": "Invalid piece type."}
+        # Verify piece type to place is valid *before* checking counts
+        if piece_type_to_place not in ["flat", "wall", "capstone"]:
+            return {"type": "error", "message": f"Invalid piece type for placement: {piece_type_to_place}"}
 
-        self.game_state["board"][r][c].append({"color": player, "type": actual_piece_type})
+        # Check piece availability
+        can_place_piece = False
+        if piece_type_to_place == "flat" or piece_type_to_place == "wall":
+            if player_pieces["flats"] > 0:
+                can_place_piece = True
+            else:
+                return {"type": "error", "message": "No flats left."}
+        elif piece_type_to_place == "capstone": # This must be 'capstone'
+            if player_pieces["capstones"] > 0:
+                can_place_piece = True
+            else:
+                return {"type": "error", "message": "No capstones left."}
+
+        # If can_place_piece is false here, it means an invalid piece_type_to_place somehow passed initial check
+        # This should be redundant due to the initial check, but for safety:
+        if not can_place_piece:
+             return {"type": "error", "message": "Internal error: Piece availability check failed unexpectedly."}
+
+
+        if not target_cell_stack:  # Cell is empty
+            # Standard placement logic for empty cells
+            if piece_type_to_place == "flat" or piece_type_to_place == "wall":
+                player_pieces["flats"] -= 1
+            elif piece_type_to_place == "capstone":
+                player_pieces["capstones"] -= 1
+            # No else needed here, already validated piece_type_to_place and can_place_piece
+
+            target_cell_stack.append({"color": player, "type": piece_type_to_place})
+        else:  # Cell is occupied, attempt to stack
+            top_piece_on_square = target_cell_stack[-1]
+            if top_piece_on_square['type'] == 'flat':
+                # Valid to stack the new 'piece_type_to_place' on this flat stone
+                if piece_type_to_place == "flat" or piece_type_to_place == "wall":
+                    player_pieces["flats"] -= 1
+                elif piece_type_to_place == "capstone":
+                    player_pieces["capstones"] -= 1
+                # No else needed here
+
+                target_cell_stack.append({"color": player, "type": piece_type_to_place})
+            else: # Top piece is 'wall' or 'capstone'
+                return {"type": "error", "message": "Cannot stack a new piece from hand onto a wall or capstone."}
+
         self._end_turn(player)
-        return None
+        return None # Indicates success
 
     def handle_move_stack(self, player, from_r, from_c, drop_instructions):
+        # ... (rest of the TakGame class and server code remains unchanged from the last correct version) ...
         if self.game_state["game_over"]: return {"type": "error", "message": "Game is over."}
         if not (self.validate_coordinates(from_r, from_c) and drop_instructions):
             return {"type": "error", "message": "Invalid source or drop instructions."}
@@ -150,39 +181,35 @@ class TakGame:
         if not (0 < num_to_pickup <= self.board_size and num_to_pickup <= len(source_stack)):
             return {"type": "error", "message": f"Invalid number of pieces to move (1-{self.board_size}, max {len(source_stack)})."}
 
-        # Validate path continuity and target cells
-        current_path_r, current_path_c = from_r, from_c
+        current_path_r_val, current_path_c_val = -1, -1
+
         for i, drop_info in enumerate(drop_instructions):
             to_r, to_c = drop_info["r"], drop_info["c"]
-            if i == 0: # First drop must be on source square
+            if i == 0:
                 if to_r != from_r or to_c != from_c:
                     return {"type":"error", "message": "First drop must be on source square."}
-            else: # Subsequent drops must be adjacent
-                 if abs(to_r - current_path_r) + abs(to_c - current_path_c) != 1:
+            else:
+                 if abs(to_r - current_path_r_val) + abs(to_c - current_path_c_val) != 1:
                     return {"type": "error", "message": "Path must be orthogonal and contiguous."}
 
             target_top = self.get_top_piece(to_r, to_c)
-            # If it's not the source square itself being modified by leaving pieces behind
-            if not (to_r == from_r and to_c == from_c) :
-                if target_top:
-                    if target_top["type"] == "capstone":
-                        return {"type": "error", "message": "Cannot move onto a capstone."}
-                    if target_top["type"] == "wall":
-                        # Only a single capstone being moved can flatten a wall
-                        is_capstone_alone_being_moved = (num_to_pickup == 1 and source_stack[-1]["type"] == "capstone")
-                        # And it must be the piece actually being dropped here
-                        is_this_drop_the_capstone = (drop_info["count"] == 1 and source_stack[-num_to_pickup]["type"] == "capstone")
 
-                        if not (is_capstone_alone_being_moved and is_this_drop_the_capstone):
-                             return {"type": "error", "message": "Only a lone capstone can flatten a wall."}
-            current_path_r, current_path_c = to_r, to_c
+            is_source_square_itself = (to_r == from_r and to_c == from_c)
+
+            if not is_source_square_itself and target_top:
+                if target_top["type"] == "capstone":
+                    return {"type": "error", "message": "Cannot move onto a capstone."}
+                if target_top["type"] == "wall":
+                    is_lone_capstone_move = (num_to_pickup == 1 and source_stack[-1]["type"] == "capstone")
+                    if not is_lone_capstone_move :
+                         return {"type": "error", "message": "Only a lone capstone can flatten a wall."}
+            current_path_r_val, current_path_c_val = to_r, to_c
 
 
-        # Passed validation, now execute move
         picked_up_stack = source_stack[-num_to_pickup:]
         self.game_state["board"][from_r][from_c] = source_stack[:-num_to_pickup]
 
-        temp_picked_up_for_distribution = list(picked_up_stack) # Make a copy to pop from
+        temp_picked_up_for_distribution = list(picked_up_stack)
 
         for drop_info in drop_instructions:
             to_r, to_c = drop_info["r"], drop_info["c"]
@@ -191,13 +218,12 @@ class TakGame:
             pieces_this_drop = temp_picked_up_for_distribution[:drop_count]
             temp_picked_up_for_distribution = temp_picked_up_for_distribution[drop_count:]
 
-            # Capstone flattening logic
             target_cell_stack = self.game_state["board"][to_r][to_c]
             top_piece_on_target = target_cell_stack[-1] if target_cell_stack else None
 
             if top_piece_on_target and top_piece_on_target["type"] == "wall" and \
                len(pieces_this_drop) == 1 and pieces_this_drop[0]["type"] == "capstone":
-                target_cell_stack[-1]["type"] = "flat" # Flatten wall
+                target_cell_stack[-1]["type"] = "flat"
 
             self.game_state["board"][to_r][to_c].extend(pieces_this_drop)
 
@@ -211,7 +237,7 @@ class TakGame:
             self.game_state["game_over"] = True
         else:
             flat_winner = self.check_flat_win()
-            if flat_winner is not None: # Game ended by flats
+            if flat_winner is not None:
                 self.game_state["winner"] = flat_winner
                 self.game_state["win_reason"] = "Flat"
                 self.game_state["game_over"] = True
@@ -252,7 +278,7 @@ def ws_tak_game(ws):
             logger.info(f"Rx: {message_str}")
             data = json.loads(message_str)
             action = data.get("action")
-            player = tak_game.game_state["currentPlayer"] # Current player for this turn
+            player = tak_game.game_state["currentPlayer"]
 
             if tak_game.game_state["game_over"] and action != "reset_game":
                 ws.send(json.dumps({"type": "info", "message": "Game is over."})); continue
@@ -272,7 +298,7 @@ def ws_tak_game(ws):
             if error_response:
                 ws.send(json.dumps(error_response))
             else:
-                broadcast_state_update() # Success, broadcast new state
+                broadcast_state_update()
 
     except Exception as e:
         logger.error(f"WS error: {e}", exc_info=True)
@@ -282,15 +308,4 @@ def ws_tak_game(ws):
 
 if __name__ == '__main__':
     logger.info("Starting Tak server with TakGame class...")
-    # Fallback for running if gevent not installed, not ideal for websockets
-    app.run(host='0.0.0.0', port=8080, debug=True, use_reloader=False) # Reloader can cause issues with global game obj
-    # For production with gevent:
-    # try:
-    #     from gevent import pywsgi
-    #     from geventwebsocket.handler import WebSocketHandler
-    #     server = pywsgi.WSGIServer(('', 8080), app, handler_class=WebSocketHandler)
-    #     logger.info("Server running on port 8080 with gevent-pywsgi.")
-    #     server.serve_forever()
-    # except ImportError:
-    #     logger.info("gevent-pywsgi not found. Running with Flask development server (Werkzeug).")
-    #     app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=True, use_reloader=False)

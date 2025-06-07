@@ -51,20 +51,147 @@ class TestTakGame(unittest.TestCase):
         self.assertEqual(self.game.get_state()["currentPlayer"], "Black")
 
     def test_placement_invalid_occupied_square(self):
-        self.game.handle_placement("White", 0, 0, "flat") # White places
-        self.game.game_state["currentPlayer"] = "White" # Force White's turn again for test
-        res = self.game.handle_placement("White", 0, 0, "flat")
-        self.assertIsNotNone(res)
-        self.assertEqual(res["message"], "Cell is not empty.")
-        self.assertEqual(len(self.game.get_state()["board"][0][0]), 1) # Still one piece
+        # This test's original intent (cannot place on ANY occupied square) is now changed by stacking rules.
+        # The first part implicitly tests valid stacking of flat on flat.
+        self.game.handle_placement("White", 0, 0, "flat") # White places a flat. board[0][0] = [W_F]. Turn -> B.
+        self.game.game_state["currentPlayer"] = "White" # Force White's turn again.
+        res_stack_flat_on_flat = self.game.handle_placement("White", 0, 0, "flat") # White places another flat on W_F.
+        self.assertIsNone(res_stack_flat_on_flat, "Stacking a flat on a flat should be a valid move (return None).")
+        stack_after_flat_on_flat = self.game.get_state()["board"][0][0]
+        self.assertEqual(len(stack_after_flat_on_flat), 2, "Stack should have 2 pieces after flat on flat.")
+        self.assertEqual(stack_after_flat_on_flat[1]["type"], "flat", "Top piece should be flat.")
+
+        # This test will now also verify (again, mirroring a passing test's setup)
+        # that stacking on a WALL is rejected.
+        self.game.reset_game_state() # Start fresh for the wall test part
+
+        # Setup: White places a wall, Black plays elsewhere, then White attempts to stack on the wall.
+        op_result_wall = self.game.handle_placement("White", 0, 0, "wall") # White places a wall. Player is now Black.
+        self.assertIsNone(op_result_wall, "Setup: Placing the initial wall should succeed.")
+
+        # Black makes a move to pass the turn back to White.
+        op_result_black_move = self.game.handle_placement("Black", 1, 1, "flat")
+        self.assertIsNone(op_result_black_move, "Setup: Black's intervening move should succeed.")
+
+        # Now it's White's turn. White attempts to place a flat on their own wall at (0,0).
+        res_on_wall = self.game.handle_placement("White", 0, 0, "flat")
+
+        self.assertIsNotNone(res_on_wall, "Attempting to stack on wall should return an error object.")
+        if res_on_wall: # Avoid TypeError if None, though assertIsNotNone should catch it.
+            self.assertEqual(res_on_wall["message"], "Cannot stack a new piece from hand onto a wall or capstone.")
+
 
     def test_placement_invalid_no_capstones_left(self):
         self.game.handle_placement("White", 0, 0, "capstone") # White uses capstone
         self.game.handle_placement("Black", 1, 0, "flat")   # Black's turn
-        self.game.game_state["currentPlayer"] = "White" # Force White's turn again
+        # White's turn again
+        self.game.game_state["currentPlayer"] = "White"
         res = self.game.handle_placement("White", 0, 1, "capstone") # Try to place another
         self.assertIsNotNone(res)
         self.assertEqual(res["message"], "No capstones left.")
+
+    # --- New Stack Formation Tests (Placing from Hand) ---
+
+    def test_stack_player_flat_on_opponent_flat(self):
+        self.game.handle_placement("Black", 0, 0, "flat") # Opponent (Black) places a flat
+        # White's turn
+        player = "White"
+        initial_white_flats = self.game.get_state()["pieces"][player]["flats"]
+        res = self.game.handle_placement(player, 0, 0, "flat") # White places flat on Black's flat
+
+        self.assertIsNone(res, f"Placement error: {res['message'] if res else ''}")
+        stack = self.game.get_state()["board"][0][0]
+        self.assertEqual(len(stack), 2)
+        self.assertEqual(stack[0]["color"], "Black")
+        self.assertEqual(stack[0]["type"], "flat")
+        self.assertEqual(stack[1]["color"], "White") # White's piece on top
+        self.assertEqual(stack[1]["type"], "flat")
+        self.assertEqual(self.game.get_state()["pieces"][player]["flats"], initial_white_flats - 1)
+        self.assertEqual(self.game.get_state()["currentPlayer"], "Black") # Turn switches
+
+    def test_stack_player_flat_on_own_flat(self):
+        self.game.handle_placement("White", 0, 0, "flat") # White places first flat
+        self.game.handle_placement("Black", 1, 0, "flat") # Black plays elsewhere
+        # White's turn again
+        player = "White"
+        initial_white_flats = self.game.get_state()["pieces"][player]["flats"]
+        res = self.game.handle_placement(player, 0, 0, "flat") # White places flat on their own flat
+
+        self.assertIsNone(res, f"Placement error: {res['message'] if res else ''}")
+        stack = self.game.get_state()["board"][0][0]
+        self.assertEqual(len(stack), 2)
+        self.assertEqual(stack[0]["color"], "White")
+        self.assertEqual(stack[1]["color"], "White")
+        self.assertEqual(self.game.get_state()["pieces"][player]["flats"], initial_white_flats - 1)
+        self.assertEqual(self.game.get_state()["currentPlayer"], "Black")
+
+    def test_stack_player_wall_on_own_flat(self):
+        self.game.handle_placement("White", 0, 0, "flat") # White places flat
+        self.game.handle_placement("Black", 1, 0, "flat") # Black plays
+        # White's turn
+        player = "White"
+        initial_white_flats = self.game.get_state()["pieces"][player]["flats"]
+        res = self.game.handle_placement(player, 0, 0, "wall") # White places wall on their flat
+
+        self.assertIsNone(res, f"Placement error: {res['message'] if res else ''}")
+        stack = self.game.get_state()["board"][0][0]
+        self.assertEqual(len(stack), 2)
+        self.assertEqual(stack[0]["type"], "flat")
+        self.assertEqual(stack[1]["type"], "wall")
+        self.assertEqual(stack[1]["color"], player)
+        self.assertEqual(self.game.get_state()["pieces"][player]["flats"], initial_white_flats - 1) # Wall uses a flat
+        self.assertEqual(self.game.get_state()["currentPlayer"], "Black")
+
+    def test_stack_player_capstone_on_own_flat(self):
+        self.game.handle_placement("White", 0, 0, "flat") # White places flat
+        self.game.handle_placement("Black", 1, 0, "flat") # Black plays
+        # White's turn
+        player = "White"
+        initial_white_capstones = self.game.get_state()["pieces"][player]["capstones"]
+        initial_white_flats = self.game.get_state()["pieces"][player]["flats"]
+        res = self.game.handle_placement(player, 0, 0, "capstone") # White places capstone on their flat
+
+        self.assertIsNone(res, f"Placement error: {res['message'] if res else ''}")
+        stack = self.game.get_state()["board"][0][0]
+        self.assertEqual(len(stack), 2)
+        self.assertEqual(stack[0]["type"], "flat")
+        self.assertEqual(stack[1]["type"], "capstone")
+        self.assertEqual(stack[1]["color"], player)
+        self.assertEqual(self.game.get_state()["pieces"][player]["capstones"], initial_white_capstones - 1)
+        self.assertEqual(self.game.get_state()["pieces"][player]["flats"], initial_white_flats) # Flats unchanged
+        self.assertEqual(self.game.get_state()["currentPlayer"], "Black")
+
+    def test_stack_player_piece_on_own_wall_FAILS(self):
+        self.game.handle_placement("White", 0, 0, "wall") # White places wall
+        self.game.handle_placement("Black", 1, 0, "flat") # Black plays
+        # White's turn
+        res = self.game.handle_placement("White", 0, 0, "flat") # Try to place flat on own wall
+        self.assertIsNotNone(res)
+        self.assertEqual(res["message"], "Cannot stack a new piece from hand onto a wall or capstone.")
+
+    def test_stack_player_piece_on_opponent_wall_FAILS(self):
+        self.game.handle_placement("Black", 0, 0, "wall") # Black places wall
+        # White's turn
+        res = self.game.handle_placement("White", 0, 0, "flat") # Try to place flat on Black's wall
+        self.assertIsNotNone(res)
+        self.assertEqual(res["message"], "Cannot stack a new piece from hand onto a wall or capstone.")
+
+    def test_stack_player_piece_on_own_capstone_FAILS(self):
+        self.game.handle_placement("White", 0, 0, "capstone") # White places capstone
+        self.game.handle_placement("Black", 1, 0, "flat") # Black plays
+        # White's turn
+        res = self.game.handle_placement("White", 0, 0, "flat") # Try to place flat on own capstone
+        self.assertIsNotNone(res)
+        self.assertEqual(res["message"], "Cannot stack a new piece from hand onto a wall or capstone.")
+
+    def test_stack_player_piece_on_opponent_capstone_FAILS(self):
+        self.game.handle_placement("Black", 0, 0, "capstone") # Black places capstone
+        # White's turn
+        res = self.game.handle_placement("White", 0, 0, "flat") # Try to place flat on Black's capstone
+        self.assertIsNotNone(res)
+        self.assertEqual(res["message"], "Cannot stack a new piece from hand onto a wall or capstone.")
+
+    # --- End of New Stack Formation Tests ---
 
     def test_simple_move_single_flat_stone(self):
         self.game.handle_placement("White", 0, 0, "flat") # White places
