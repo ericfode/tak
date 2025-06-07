@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tak Game - Frontend Tests</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        #test-results {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .test-pass { color: green; }
+        .test-fail { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Tak Game - Frontend Tests</h1>
+
+    <div id="game-container" style="display: none;"> <!-- Hidden, but available for app.js -->
+        <h1>Tak Online</h1>
+        <div id="player-info">
+            <p>Current Turn: <span id="current-player">White</span></p>
+            <div id="piece-counts">
+                <p>White: <span id="white-flats">?</span> Flats, <span id="white-capstones">?</span> Capstone</p>
+                <p>Black: <span id="black-flats">?</span> Flats, <span id="black-capstones">?</span> Capstone</p>
+            </div>
+        </div>
+        <div id="game-board"></div>
+        <div id="controls">
+            <fieldset>
+                <legend>Actions</legend>
+                <button id="btn-place-flat" data-action="place_flat">Place Flat</button>
+                <button id="btn-place-wall" data-action="place_wall">Place Wall</button>
+                <button id="btn-place-capstone" data-action="place_capstone">Place Capstone</button>
+                <button id="btn-move-stack" data-action="move_select_source">Move Stack</button>
+                <button id="btn-reset-game">Reset Game</button>
+            </fieldset>
+        </div>
+        <div id="move-controls-panel"></div>
+        <div id="game-messages"><p>Test Runner Initialized.</p></div>
+    </div>
+
+    <div id="test-results"></div>
+
+    <!-- IMPORTANT: Load app.js first, then tests -->
+    <script src="app.js"></script>
+    <script src="app_tests.js"></script>
+
+    <script>
+        // Automatically run tests when the page loads
+        window.onload = () => {
+            // Expose app.js internals for testing if necessary
+            // This assumes app.js might put things on `window.takGameApp` or similar
+            // Or that its functions are globally accessible (less ideal but simpler for this setup)
+            if (window.runAllAppTests) {
+                window.runAllAppTests();
+            } else {
+                document.getElementById('test-results').innerHTML = '<div class="test-fail">Error: Test runner function (runAllAppTests) not found. Check app_tests.js.</div>';
+            }
+        };
+    </script>
+</body>
+</html>
