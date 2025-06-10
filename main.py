@@ -292,7 +292,9 @@ def create_room():
     return jsonify({"code": room_code})
 
 @app.route('/')
+@app.route('/index.html')
 def index():
+    """Serve the main game page."""
     return send_from_directory('.', 'index.html')
 
 @sock.route('/ws/<room_code>')
@@ -357,9 +359,8 @@ def ws_tak_game(ws, room_code):
 
 @app.route('/<path:path>')
 def static_files(path):
-    if path in ['app.js', 'style.css']:
-        return send_from_directory('.', path)
-    return send_from_directory('static', path)
+    """Serve other static assets from the repo root."""
+    return send_from_directory('.', path)
 
 if __name__ == '__main__':
     logger.info("Starting Tak server with TakGame class...")
