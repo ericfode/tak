@@ -1,3 +1,103 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+    #game-board {
+        --cell-size: 12vw; /* Use viewport width for responsive cells */
+        --max-cell-size: 70px; /* Max size for larger screens */
+        --min-cell-size: 50px; /* Min size for smaller screens */
+        display: grid;
+        gap: 2px;
+        grid-template-columns: repeat(var(--board-size, 5), clamp(var(--min-cell-size), var(--cell-size), var(--max-cell-size)));
+        grid-template-rows: repeat(var(--board-size, 5), clamp(var(--min-cell-size), var(--cell-size), var(--max-cell-size)));
+        width: min-content; /* Make the board only as wide as its content */
+        background-color: #8B4513; /* A saddle brown color for the gaps */
+        border: 4px solid #8B4513;
+        border-radius: 4px;
+    }
+
+    .board-cell {
+        /* Use clamp for font-size as well, based on cell size */
+        --font-size: calc(clamp(var(--min-cell-size), var(--cell-size), var(--max-cell-size)) * 0.8);
+        background-color: #d2b48c; /* Tan color for the board */
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: var(--font-size);
+        line-height: 1;
+        width: clamp(var(--min-cell-size), var(--cell-size), var(--max-cell-size));
+        height: clamp(var(--min-cell-size), var(--cell-size), var(--max-cell-size));
+    }
+
+    .piece {
+      /* The font-size is inherited from .board-cell */
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+      -webkit-user-select: none; /* Safari */
+      -ms-user-select: none; /* IE 10+ */
+      user-select: none;
+    }
+
+    .flat-white, .wall-white, .capstone-white {
+        color: #f0f0f0;
+    }
+
+    .flat-black, .wall-black, .capstone-black {
+        color: #333;
+    }
+
+    .highlight-empty:hover {
+        background-color: #b89a74;
+        cursor: pointer;
+    }
+
+    .highlight-source:hover {
+        background-color: #a2c4a2;
+        cursor: pointer;
+    }
+
+    .highlight-target:hover {
+        background-color: #9cb8d2;
+        cursor: pointer;
+    }
+
+    .source-selected {
+        background-color: #a2c4a2 !important;
+        outline: 2px solid green;
+    }
+
+    .path-selected {
+        background-color: #9cb8d2 !important;
+    }
+
+    .active-action {
+        box-shadow: 0 0 5px 2px #3799eB; /* blue-600 */
+        border: 1px solid #3799eB;
+    }
+
+    .stack-count {
+        position: absolute;
+        bottom: 2px;
+        right: 4px;
+        font-size: 0.8rem;
+        font-weight: bold;
+        color: red;
+        -webkit-text-stroke: 1px white;
+    }
+
+    .drop-indicator {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 128, 0, 0.3);
+        color: white;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 1.5rem;
+        font-weight: bold;
+    }
+
+}

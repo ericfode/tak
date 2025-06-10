@@ -1,3 +1,6 @@
+from gevent import monkey
+monkey.patch_all()
+
 import os
 import json
 import logging
@@ -263,21 +266,31 @@ class TakGame:
 # Global game instance (REMOVED)
 # tak_game = TakGame(board_size=DEFAULT_BOARD_SIZE)
 
+def broadcast_info(room_code, message):
+    """Broadcasts an informational message to all clients in a room."""
+    room = rooms.get(room_code)
+    if not room: return
+    info_message = json.dumps({"type": "info", "message": message})
+    for client_ws in list(room["clients"].values()):
+        try:
+            client_ws.send(info_message)
+        except Exception as e:
+            logger.error(f"Info broadcast error in room {room_code}: {e}")
+
 def broadcast_state_update(room_code):
     """Broadcasts the current game state to all clients in a room."""
     room = rooms.get(room_code)
     if not room:
         return
 
-    message = {"type": "update", "data": room["game"].get_state()}
-    json_message = json.dumps(message)
-    # Iterate over a copy of the set for safe removal
-    for client_ws in list(room["clients"]):
+    state_message = {"type": "update", "data": room["game"].get_state()}
+    json_state_message = json.dumps(state_message)
+    
+    for client_ws in list(room["clients"].values()):
         try:
-            client_ws.send(json_message)
+            client_ws.send(json_state_message)
         except Exception as e:
-            logger.error(f"Broadcast error in room {room_code}: {e}")
-            room["clients"].remove(client_ws)
+            logger.error(f"State broadcast error in room {room_code}: {e}")
 
 @app.route('/api/rooms', methods=['POST'])
 def create_room():
@@ -286,7 +299,7 @@ def create_room():
     room_code = generate_room_code()
     rooms[room_code] = {
         "game": TakGame(board_size=board_size),
-        "clients": set()
+        "clients": {}
     }
     logger.info(f"Room {room_code} created with board size {board_size}.")
     return jsonify({"code": room_code})
@@ -308,20 +321,48 @@ def ws_tak_game(ws, room_code):
 
     game_instance = room["game"]
     clients = room["clients"]
+    
+    # --- Player Assignment Logic ---
+    player_color = None
+    if "White" not in clients:
+        player_color = "White"
+    elif "Black" not in clients:
+        player_color = "Black"
+    else:
+        # Room is full, could be a spectator in the future
+        ws.close(reason=1008, message="Room is full.")
+        return
+        
+    clients[player_color] = ws
+    logger.info(f"Client {player_color} connected to room {room_code}. Total clients: {len(clients)}")
+    
+    # Send init message to the connecting client
+    init_message = {
+        "type": "init", 
+        "data": game_instance.get_state(), 
+        "message": f"Welcome to room {room_code}! You are {player_color}."
+    }
+    ws.send(json.dumps(init_message))
 
-    clients.add(ws)
-    logger.info(f"Client connected to room {room_code}. Total clients in room: {len(clients)}")
-    ws.send(json.dumps({"type": "init", "data": game_instance.get_state(), "message": f"Welcome to room {room_code}!"}))
+    # If the second player has joined, notify everyone to start the game
+    if len(clients) == 2:
+        broadcast_info(room_code, "Both players connected. White's turn.")
 
     try:
         while True:
             message_str = ws.receive(timeout=None)
             if message_str is None: break
-            logger.info(f"Rx in room {room_code}: {message_str}")
+            logger.info(f"Rx in room {room_code} from {player_color}: {message_str}")
             data = json.loads(message_str)
             action = data.get("action")
-            # The player is determined by the game state within the room
-            player = game_instance.game_state["currentPlayer"]
+
+            # --- Player Turn Verification ---
+            # Now we check if the message is from the correct player
+            current_player_in_game = game_instance.game_state["currentPlayer"]
+            if player_color != current_player_in_game:
+                error_msg = f"It's not your turn. It's {current_player_in_game}'s turn."
+                ws.send(json.dumps({"type": "error", "message": error_msg}))
+                continue
 
             if game_instance.game_state["game_over"] and action != "reset_game":
                 ws.send(json.dumps({"type": "info", "message": "Game is over."}))
@@ -330,32 +371,35 @@ def ws_tak_game(ws, room_code):
             error_response = None
             if action == "reset_game":
                 game_instance.reset_game_state()
+                broadcast_info(room_code, "Game has been reset.")
                 broadcast_state_update(room_code)
                 continue
             elif action in ["place_flat", "place_wall", "place_capstone"]:
-                error_response = game_instance.handle_placement(player, data.get("r"), data.get("c"), action.split('_')[1])
+                error_response = game_instance.handle_placement(player_color, data.get("r"), data.get("c"), action.split('_')[1])
             elif action == "move_stack":
-                error_response = game_instance.handle_move_stack(player, data.get("from_r"), data.get("from_c"), data.get("drops"))
+                error_response = game_instance.handle_move_stack(player_color, data.get("from_r"), data.get("from_c"), data.get("drops"))
             else:
                 error_response = {"type": "error", "message": "Unknown action."}
 
             if error_response:
-                # If there's an error, send it back to the client, but also include the last valid game state for rollback.
                 error_response["data"] = game_instance.get_state()
                 ws.send(json.dumps(error_response))
             else:
                 broadcast_state_update(room_code)
 
     except Exception as e:
-        logger.error(f"WS error in room {room_code}: {e}", exc_info=True)
+        logger.error(f"WS error in room {room_code} for player {player_color}: {e}", exc_info=True)
     finally:
-        clients.remove(ws)
-        logger.info(f"Client disconnected from room {room_code}. Total clients in room: {len(clients)}")
-        # Optional: Clean up empty rooms
+        if player_color in clients:
+            del clients[player_color]
+        logger.info(f"Client {player_color} disconnected from room {room_code}. Total clients: {len(clients)}")
         if not clients:
-            del rooms[room_code]
-            logger.info(f"Room {room_code} is empty and has been removed.")
-
+            if room_code in rooms:
+                del rooms[room_code]
+                logger.info(f"Room {room_code} is empty and has been removed.")
+        else:
+            # Notify remaining player that their opponent disconnected
+            broadcast_info(room_code, f"Player {player_color} has disconnected.")
 
 @app.route('/<path:path>')
 def static_files(path):

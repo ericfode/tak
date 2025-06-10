@@ -1,4 +1,4 @@
 Flask>=2.0
 Flask-Sock>=0.5
 gevent>=21.0 # For gevent-pywsgi
-gevent-websocket>=0.10 # For WebSocketHandler with gevent-pywsgi
+gunicorn>=20.0

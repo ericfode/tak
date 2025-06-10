@@ -291,8 +291,7 @@ window.takGameApp = {
     renderBoard: function() {
         if (!this.boardElement) return;
         this.boardElement.innerHTML = '';
-        this.boardElement.style.gridTemplateColumns = `repeat(${this.BOARD_SIZE}, 60px)`;
-        this.boardElement.style.gridTemplateRows = `repeat(${this.BOARD_SIZE}, 60px)`;
+        this.boardElement.style.setProperty('--board-size', this.BOARD_SIZE);
 
         if (!this.gameState.board) return;
         for (let r = 0; r < this.BOARD_SIZE; r++) {
